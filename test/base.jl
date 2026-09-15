@@ -1,3 +1,10 @@
+@testset "Numbers are leaves" begin
+  @test Functors.isleaf(1)
+  @test Functors.isleaf(1.0)
+  @test Functors.isleaf(1im)
+  @test Functors.isleaf(1//2)
+  @test Functors.isleaf(1.0 + 2.0im)
+end
 
 @testset "RefValue" begin
   @test fmap(sqrt, Ref(16))[] == 4.0
@@ -42,6 +49,14 @@ end
     @test fmap(sqrt, Base.Fix2(/, 4); exclude)(10) == 5.0
 end
 
+@testset "Set" begin
+  s = Set([4, 9])
+  (xs, rec) = Functors.functor(s)
+  @test issetequal(xs, s)
+  @test rec(xs) == s
+  @test fmap(sqrt, s) == rec(map(sqrt, xs)) == Set([2, 3])
+end
+
 @testset "BroadcastFunction" begin
   f = Bar(3.3)
   bf = Base.Broadcast.BroadcastFunction(f)
@@ -50,13 +65,13 @@ end
   @test fmap(x -> x + 10, bf) == Base.Broadcast.BroadcastFunction(Bar(13.3))
 end
 
-VERSION >= v"1.7" && @testset "Returns" begin
+@testset "Returns" begin
   ret = Returns([0, pi, 2pi])
   @test Functors.functor(ret)[1] == (value = [0, pi, 2pi],)
   @test Functors.functor(ret)[2]((value = 1:3,)) === Returns(1:3)
 end
 
-VERSION >= v"1.9" && @testset "Splat" begin
+@testset "Splat" begin
   ret = Base.splat(Returns([0, pi, 2pi]))
   @test Functors.functor(ret)[1].f.value == [0, pi, 2pi]
   @test Functors.functor(ret)[2]((f = sin,)) === Base.splat(sin)
@@ -172,3 +187,52 @@ end
     @test x.is[1] isa Vector{<:Complex}
     @test collect(x) isa Vector{<:Tuple{Complex, Complex}}
 end
+
+@testset "AbstractString is leaf" begin
+  struct DummyString <: AbstractString
+    str::String
+  end
+  s = DummyString("hello")
+  @test Functors.isleaf(s)
+end
+@testset "AbstractPattern is leaf" begin
+  struct DummyPattern <: AbstractPattern
+    pat::Regex
+  end
+  p = DummyPattern(r"\d+")
+  @test Functors.isleaf(p)
+  @test Functors.isleaf(r"\d+")  
+end
+@testset "AbstractChar is leaf" begin
+  struct DummyChar <: AbstractChar
+    ch::Char
+  end
+  c = DummyChar('a')
+  @test Functors.isleaf(c)
+  @test Functors.isleaf('a')
+end
+
+@testset "AbstractDict is functor" begin
+  od = OrderedDict(1 => 1, 2 => 2)
+  @test !Functors.isleaf(od)
+  od2 = fmap(x -> 2x, od)
+  @test od2 isa OrderedDict
+  @test od2[1] == 2
+  @test od2[2] == 4
+end
+
+@testset "AbstractSet is functor" begin
+  os = OrderedSet([1, 2])
+  @test !Functors.isleaf(os)
+  os2 = fmap(x -> 2x, os)
+  @test os2 isa OrderedSet
+  @test os2[1] == 2
+  @test os2[2] == 4
+end
+
+@testset "Types are leaves" begin
+  @test Functors.isleaf(Int)
+  @test Functors.isleaf(Array)
+  @test fmap(identity, (1,Int,Ref,Array,5)) == (1,Int,Ref,Array,5)
+end
+

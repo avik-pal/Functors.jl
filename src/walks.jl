@@ -9,11 +9,13 @@ function check_lenghts(x, ys...)
 end
 
 _map(f, x::Dict, ys...) = Dict(k => f(v, (y[k] for y in ys)...) for (k, v) in x)
+_map(f, x::D, ys...) where {D<:AbstractDict} = 
+  constructorof(D)([k => f(v, (y[k] for y in ys)...) for (k, v) in x]...)
 
 _values(x) = x
-_values(x::Dict) = values(x)
+_values(x::AbstractDict) = values(x)
 
-_keys(x::Dict) = Dict(k => k for k in keys(x))
+_keys(x::D) where {D <: AbstractDict} = constructorof(D)(k => k for k in keys(x))
 _keys(x::Tuple) = (keys(x)...,)
 _keys(x::AbstractArray) = collect(keys(x))
 _keys(x::NamedTuple{Ks}) where Ks = NamedTuple{Ks}(Ks)
@@ -52,26 +54,6 @@ function execute(walk::AbstractWalk, x, ys...)
   recurse(xs...) = walk(var"#self#", xs...)
   walk(recurse, x, ys...)
 end
-
-"""
-    AnonymousWalk(walk_fn)
-
-Wrap a `walk_fn` so that `AnonymousWalk(walk_fn) isa AbstractWalk`.
-This type only exists for backwards compatability and should not be directly used.
-Attempting to wrap an existing `AbstractWalk` is a no-op (i.e. it is not wrapped).
-"""
-struct AnonymousWalk{F} <: AbstractWalk
-  walk::F
-
-  function AnonymousWalk(walk::F) where F
-    Base.depwarn("Wrapping a custom walk function as an `AnonymousWalk`. Future versions will only support custom walks that explicitly subtype `AbstractWalk`.", :AnonymousWalk)
-    return new{F}(walk)
-  end
-end
-# do not wrap an AbstractWalk
-AnonymousWalk(walk::AbstractWalk) = walk
-
-(walk::AnonymousWalk)(recurse, x, ys...) = walk.walk(recurse, x, ys...)
 
 """
     DefaultWalk()
@@ -179,10 +161,10 @@ Whenever the cache already contains `x`, either:
 
 Typically wraps an existing `walk` for use with [`fmap`](@ref).
 """
-struct CachedWalk{T, S} <: AbstractWalk
+struct CachedWalk{T, S, C <: AbstractDict} <: AbstractWalk
   walk::T
   prune::S
-  cache::IdDict{Any, Any}
+  cache::C
 end
 CachedWalk(walk; prune = NoKeyword(), cache = IdDict()) =
   CachedWalk(walk, prune, cache)
@@ -190,7 +172,7 @@ CachedWalk(walk; prune = NoKeyword(), cache = IdDict()) =
 function (walk::CachedWalk)(recurse, x, ys...)
   should_cache = usecache(walk.cache, x)
   if should_cache && haskey(walk.cache, x)
-    return walk.prune isa NoKeyword ? walk.cache[x] : walk.prune
+    return walk.prune isa NoKeyword ? cacheget(walk.cache, x, recurse, x, ys...) : walk.prune
   else
     ret = walk.walk(recurse, x, ys...)
     if should_cache
@@ -200,10 +182,10 @@ function (walk::CachedWalk)(recurse, x, ys...)
   end
 end
 
-struct CachedWalkWithPath{T, S} <: AbstractWalk
+struct CachedWalkWithPath{T, S, C <: AbstractDict} <: AbstractWalk
   walk::T
   prune::S
-  cache::IdDict{Any, Any}
+  cache::C
 end
 
 CachedWalkWithPath(walk; prune = NoKeyword(), cache = IdDict()) =
@@ -212,7 +194,7 @@ CachedWalkWithPath(walk; prune = NoKeyword(), cache = IdDict()) =
 function (walk::CachedWalkWithPath)(recurse, kp::KeyPath, x, ys...)
   should_cache = usecache(walk.cache, x)
   if should_cache && haskey(walk.cache, x)
-    return walk.prune isa NoKeyword ? walk.cache[x] : walk.prune
+    return walk.prune isa NoKeyword ? cacheget(walk.cache, x, recurse, kp, x, ys...) : walk.prune
   else
     ret = walk.walk(recurse, kp, x, ys...)
     if should_cache
